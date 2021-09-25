@@ -18,18 +18,37 @@
 #define DELIM " \n\t"
 //Number of items to increment to size of tokens by
 #define TOKENS_SIZE 16
+//Number of builtin functions
+#define NUM_BUILT_INS 3
 
 static char **PATH;
-
 
 //Function Prototypes
 void interactiveMode();
 char **parse(char *l);
 int tashExecuteHelp(char **args);
 int tashExecute(char **args);
-void exitBuiltin();
-int cd(char *d);
-int path(char **p);
+int exitBuiltin(char **args);
+int cd(char **args);
+int path(char **args);
+
+//List of the commands for builtin functions
+char *builtIns[] = {
+	"exit",
+	"cd",
+	"path"
+};
+
+
+
+//List of the function pointers for their respective builtin commands
+int (*builtInPointers[]) (char **) = {
+	&exitBuiltin,
+	&cd,
+	&path
+
+};
+
 
 
 
@@ -43,13 +62,6 @@ int main() {
 
 	//Batch Mode
 	
-	//Testing code
-	char *t[2];
-	char *temp = "/usr/bin";
-	t[0] = b;
-	t[1] = temp;
-	path(t);
-
 	
 	//Interactive Mode
 	interactiveMode();
@@ -80,9 +92,9 @@ void interactiveMode() {
 		//Run command if not in parallel
 		tashExecuteHelp(parsed);
 		
-		
+		printf("TEST\n");		
 		//Temporary exit condition
-		exit(EXIT_SUCCESS);
+		//exit(EXIT_SUCCESS);
 	}
 
 
@@ -126,7 +138,10 @@ int tashExecuteHelp(char **args) {
 	//check for empty command
 	if(args[0] == NULL) { return 1; }
 	//check if command is a builtin
-	
+	int i;
+	for(i = 0; i < NUM_BUILT_INS; i++) {
+		if(strcmp(args[0], builtIns[i]) == 0) { return (*builtInPointers[i])(args); }
+	}
 	//command is not a builtin so execute it
 	return tashExecute(args);
 }
@@ -172,22 +187,25 @@ int tashExecute(char **args) {
 
 
 
-
 //Builtin Commands
 
 //exit command, calls exit system call with code 0
-void exitBuiltin() {
+int exitBuiltin(char **args) {
 	exit(EXIT_SUCCESS);
+	return 1;
 }
 
 //cd command, changes to current directory to d, outputs an error if it failed
-int cd(char *d) {
-	if(chdir(d) != 0) { perror("chdir() failed"); }
+int cd(char **args) {
+	if(args[1] == NULL) { printf("Argument expected for cd"); }
+	else {
+		if(chdir(args[1]) != 0) { perror("chdir() failed"); }
+	}
 	return 1;
 }
 
 //path command
-int path(char **p) {
-	PATH = p;
+int path(char **args) {
+	PATH = args;
 	return 1;
 }
