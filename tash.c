@@ -20,7 +20,10 @@
 #define TOKENS_SIZE 16
 //Number of builtin functions
 #define NUM_BUILT_INS 3
+//Maximum number of paths in PATH
+#define PATH_MAX 100
 
+//PATH variable with support for up to PATH_MAX number of paths
 static char **PATH;
 
 //Function Prototypes
@@ -52,11 +55,20 @@ int (*builtInPointers[]) (char **) = {
 
 
 
-int main() {	
+int main() {
+	//Malloc PATH
+	PATH = (char **)malloc(sizeof(char *) * PATH_MAX);
+	int i;
+	//Malloc all entries in PATH
+	for(i = 0; i < PATH_MAX; i++) {
+		PATH[i] = (char *)malloc(sizeof(char) * STRING_MAX);
+	}
+
 	//Set default path
-	char *a[1];
-	char *b = "/bin";
-	a[0] = b;
+	char *a[2];
+	char *b = "path";
+	char *c = "/bin";
+	a[0] = b; a[1] = c;
 	path(a);
 	//Check if run in batch mode, if so execute all commands in batch file then terminate, else run in interactive mode
 
@@ -91,8 +103,7 @@ void interactiveMode() {
 
 		//Run command if not in parallel
 		tashExecuteHelp(parsed);
-		
-		printf("TEST\n");		
+				
 		//Temporary exit condition
 		//exit(EXIT_SUCCESS);
 	}
@@ -153,21 +164,37 @@ int tashExecute(char **args) {
 	pid = fork();
 	//check for forking error
 	if(pid < 0) {
-		perror("Forking failed");
+		char error_message[30] = "An error has occurred\n";
+		write(STDERR_FILENO, error_message, strlen(error_message));
 	} else if(pid == 0) {
 		//if child process, then find command location in PATH and execute
 		char p[STRING_MAX];
 		strcpy(p, PATH[0]);
 		int i;
-		for(i = 1; p != NULL; i++) {
+		//if p is null or empty, then error
+		if(p == '\0' || strcmp(p, "") == 0) {
+			char error_message[30] = "An error has occurred\n";
+			write(STDERR_FILENO, error_message, strlen(error_message));
+			exit(EXIT_FAILURE);
+		}
+		//p must contain something, iterate until program is found or
+		//until p contains "" or is NULL
+		for(i = 1; strcmp(p, "") != 0 && p != NULL; i++) {
 			char *temp = "/";
 			strcat(p, temp);
 			strcat(p, args[0]);
 			int a = access(p, X_OK);
+			
 			//access confirmed that address p contains the program so execute it
 			if(a == 0) {
-				if(execv(p, args) == -1) { perror("Failed to execute"); }
-			} else { perror("Access error"); }
+				if(execv(p, args) == -1) { 
+					char error_message[30] = "An error has occurred\n";
+					write(STDERR_FILENO, error_message, strlen(error_message));
+				}
+			} else {
+				char error_message[30] = "An error has occurred\n";
+				write(STDERR_FILENO, error_message, strlen(error_message));
+			}
 			strcpy(p, PATH[i]);
 		}
 		//if the child reaches this point, then it failed to execute a command
@@ -191,21 +218,60 @@ int tashExecute(char **args) {
 
 //exit command, calls exit system call with code 0
 int exitBuiltin(char **args) {
+	//check if exit was passed an argument, and output an error if so
+	if(args[1] != NULL) { 
+		char error_message[30] = "An error has occurred\n";
+		write(STDERR_FILENO, error_message, strlen(error_message));
+		return 1;
+	}
 	exit(EXIT_SUCCESS);
 	return 1;
 }
 
 //cd command, changes to current directory to d, outputs an error if it failed
 int cd(char **args) {
-	if(args[1] == NULL) { printf("Argument expected for cd"); }
+	if(args[1] == NULL) {
+		char error_message[30] = "An error has occurred\n";
+		write(STDERR_FILENO, error_message, strlen(error_message));
+	}
 	else {
-		if(chdir(args[1]) != 0) { perror("chdir() failed"); }
+		if(chdir(args[1]) != 0) {
+			char error_message[30] = "An error has occurred\n";
+			write(STDERR_FILENO, error_message, strlen(error_message));
+		}
 	}
 	return 1;
 }
 
 //path command
 int path(char **args) {
-	PATH = args;
+	//Empty PATH of previous paths
+	int i;
+	for(i = 0; PATH[i] != NULL; i++) {
+		//Empty the string
+		strcpy(PATH[i], "");
+	}
+
+	//Parse through the paths until the end, if the last character is a '/', then remove it
+	//Start at args[1] because args[0] contains "path"
+	for(i = 1; args[i] != NULL; i++) {
+		int j;
+		char *temp = args[i];
+		char secondToLast = '\0';
+		//iterate through the string until the end
+		for(j = 0; temp[j] != '\0'; j++) { secondToLast = temp[j]; }
+		//if the secondToLast is a '/', then remove it
+		if(secondToLast == '/') { temp[j-1] = '\0'; }
+
+		//Add the corrected path to PATH
+		strcpy(PATH[i-1], temp);
+
+	}
 	return 1;
 }
+
+
+
+
+
+
