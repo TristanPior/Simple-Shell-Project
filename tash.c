@@ -27,6 +27,7 @@
 static char **PATH;
 
 //Function Prototypes
+void batchMode(FILE *file);
 void interactiveMode();
 char **parse(char *l);
 int tashExecuteHelp(char **args);
@@ -55,7 +56,7 @@ int (*builtInPointers[]) (char **) = {
 
 
 
-int main() {
+int main(int argc, char *argv[]) {
 	//Malloc PATH
 	PATH = (char **)malloc(sizeof(char *) * PATH_MAX);
 	int i;
@@ -71,17 +72,57 @@ int main() {
 	a[0] = b; a[1] = c;
 	path(a);
 	//Check if run in batch mode, if so execute all commands in batch file then terminate, else run in interactive mode
+	if(argc > 1) {
+		//Batch Mode
+		if(argc > 2) {
+			//Too many arguments
+			char error_message[30] = "An error has occurred\n";
+			write(STDERR_FILENO, error_message, strlen(error_message));
+			exit(1);
+		}
+		FILE *file = fopen(argv[1], "r");
+		batchMode(file);
 
-	//Batch Mode
-	
-	
-	//Interactive Mode
-	interactiveMode();
-	
+	} else {	
+		//Interactive Mode
+		interactiveMode();
+	}
 	return 1;
 }
 
 //Helpers
+void batchMode(FILE *file) {
+	char *line = (char *)malloc(sizeof(char) * STRING_MAX);
+	//Infinite loop to read through batch file
+	while(1) {
+		//Grab input
+		fgets(line, STRING_MAX, file);
+
+		//Check for EOF
+		if(feof(file)) { exit(0); }
+
+		//Parse input
+		char **parsed;
+		parsed = parse(line);
+
+
+		//Check for redirection
+
+		//Check for parallel commands
+	
+		//Run commands in parallel
+
+		//Run command if not in parallel
+		tashExecuteHelp(parsed);
+	}
+}
+
+
+
+
+
+
+
 void interactiveMode() {
 	char *line = NULL;
 	size_t length = 0;
@@ -90,6 +131,9 @@ void interactiveMode() {
 		//Grab input
 		printf("tash> ");
 		getline(&line, &length, stdin);
+		
+		//Check for EOF
+		if(feof(stdin)) { exit(0); }
 
 		//Parse input
 		char **parsed;
@@ -103,9 +147,6 @@ void interactiveMode() {
 
 		//Run command if not in parallel
 		tashExecuteHelp(parsed);
-				
-		//Temporary exit condition
-		//exit(EXIT_SUCCESS);
 	}
 
 
@@ -131,7 +172,7 @@ char **parse(char *l) {
 		i++;
 		//Grab next token
 		token = strtok(NULL, DELIM);
-
+		
 		//If tokens is full, increase its size
 		if(i > tSize) {
 			tSize += TOKENS_SIZE;
@@ -191,13 +232,12 @@ int tashExecute(char **args) {
 					char error_message[30] = "An error has occurred\n";
 					write(STDERR_FILENO, error_message, strlen(error_message));
 				}
-			} else {
-				char error_message[30] = "An error has occurred\n";
-				write(STDERR_FILENO, error_message, strlen(error_message));
 			}
 			strcpy(p, PATH[i]);
 		}
 		//if the child reaches this point, then it failed to execute a command
+		char error_message[30] = "An error has occurred\n";
+		write(STDERR_FILENO, error_message, strlen(error_message));
 		exit(EXIT_FAILURE);
 	} else {
 		//parent waits for the child process to finish
