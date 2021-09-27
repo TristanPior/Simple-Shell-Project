@@ -12,9 +12,9 @@
 #include <fcntl.h>
 
 //Max string size
-#define STRING_MAX 1000
+#define STRING_MAX 20000
 //Max number of commands/arguments in one line supported
-#define MAXCMD 100
+#define MAXCMD 5000
 //Delimiters for parsing
 #define DELIM " \n\t"
 //Number of items to increment to size of tokens by
@@ -23,6 +23,8 @@
 #define NUM_BUILT_INS 3
 //Maximum number of paths in PATH
 #define PATH_MAX 100
+//Maximum number of parallel commands
+#define MAX_PARALLEL 200
 
 //PATH variable with support for up to PATH_MAX number of paths
 static char **PATH;
@@ -30,8 +32,11 @@ static char **PATH;
 //Function Prototypes
 void batchMode(FILE *file);
 void interactiveMode();
+char **parseParallel(char *l);
 char **parse(char *l);
+void tashParallelHelp(char ***cmds);
 int tashExecuteHelp(char **args);
+int tashParallelExecute(char **args);
 int tashExecute(char **args);
 int exitBuiltin(char **args);
 int cd(char **args);
@@ -103,19 +108,29 @@ void batchMode(FILE *file) {
 		if(feof(file)) { exit(0); }
 
 		//Parse input for parallel commands
-
-		//Parse and run commmands in parallel
-
-		
-		//Parse and run commands not in parallel
-		//Parse input
-		char **parsed;
-		parsed = parse(line);
-		
-		//Redirection error checking
-		if(parsed != NULL) {
-			//Run command if not in parallel
-			tashExecuteHelp(parsed);
+		char **parallel;
+		parallel = parseParallel(line);
+		if(parallel[1] != NULL) {
+			//Parse and run commands in parallel
+			int i;
+			//Store parsed parallel commands in a list to pass to tashParallelHelp()
+			char ***parsedParallel = (char ***)malloc(sizeof(char **) * MAX_PARALLEL);
+			for(i = 0; parallel[i] != NULL; i++) {
+				char **parsed = parse(parallel[i]);
+				parsedParallel[i] = parsed;
+			}
+			tashParallelHelp(parsedParallel);
+		} else {
+			//Parse and run commands not in parallel
+			//Parse input
+			char **parsed;
+			parsed = parse(parallel[0]);
+			
+			//Redirection error checking
+			if(parsed != NULL) {
+				//Run command not in parallel
+				tashExecuteHelp(parsed);
+			}
 		}
 	}
 }
@@ -139,26 +154,76 @@ void interactiveMode() {
 		if(feof(stdin)) { exit(0); }
 
 		//Parse input for parrallel
-		
-		//Parse and run commands in parallel
-		
-
-		//Parse and run commands not in parallel
-		//Parse input
-		char **parsed;
-		parsed = parse(line);
-		
-		//Redirection error checking
-		if(parsed != NULL) {
-			//Run command not in parallel
-			tashExecuteHelp(parsed);
+		char **parallel;
+		parallel = parseParallel(line);
+		if(parallel[1] != NULL) {
+			//Parse and run commands in parallel
+			int i;
+			//Store parsed parallel commands in a list to pass to tashParallelHelp()
+			char ***parsedParallel = (char ***)malloc(sizeof(char **) * MAX_PARALLEL);
+			for(i = 0; parallel[i] != NULL; i++) {
+				char **parsed = parse(parallel[i]);
+				parsedParallel[i] = parsed;
+			}
+			tashParallelHelp(parsedParallel);
+		} else {
+			//Parse and run commands not in parallel
+			//Parse input
+			char **parsed;
+			parsed = parse(parallel[0]);
+			
+			//Redirection error checking
+			if(parsed != NULL) {
+				//Run command not in parallel
+				tashExecuteHelp(parsed);
+			}
 		}
 	}
-
-
 }
 
+//Parse parallel functions
+char **parseParallel(char *l) {
+	//Tracks the current max number of elements in tokens
+	int tSize = TOKENS_SIZE;
+	//holds all parallel commands from l
+	char **commands = malloc(tSize * sizeof(char*));
+	//used to grab individual commands with strtok()
+	char *command;
+	//tracks the current index
+	int i = 0;
+	//tracker for error checking where there is only "&"
+	int parallelPresent = 0;
+	if(strchr(l, '&') != NULL) {
+		parallelPresent = 1;
+	}
 
+	//grab first command
+	command = strtok(l, "&");
+	while(command != NULL && strcmp(command, "\n") != 0) {
+		//Store the command into commands
+		commands[i] = command;
+		i++;
+		
+		//Grab next token
+		command = strtok(NULL, "&");
+		//If commands is full, increase its size
+		if(i > tSize) {
+			tSize += TOKENS_SIZE;
+			commands = realloc(commands, tSize * sizeof(char*));
+		}
+
+	}
+	//Set the last command to NULL
+	commands[i] = NULL;
+
+	//Error when input is only "&"'s
+	if((commands[0] == NULL || strcmp(commands[0], "\n") == 0) && parallelPresent) {
+		char error_message[30] = "An error has occurred\n";
+		write(STDERR_FILENO, error_message, strlen(error_message));
+
+	}
+	return commands;
+}
 
 
 //Parsing helper function, passes back an array of tokens
@@ -272,6 +337,41 @@ char **parse(char *l) {
 
 }
 
+//Parallel execution helper function, determines if a function is empty, a builtin, or not,
+//and after all commands are executed, it waits for all of them to finish
+void tashParallelHelp(char ***cmds) {
+	//Iterate through all commands
+	int waitingProcesses = 0;
+	int pidList[MAX_PARALLEL];
+	int i;
+	for(i = 0; cmds[i] != NULL; i++) {
+		char **temp = cmds[i];
+		//check for empty command
+		if(temp[0] == NULL) { /* do nothing */ }
+		//check if command is a builtin
+		int j;
+		int builtIn = 0;
+		for(j = 0; j < NUM_BUILT_INS; j++) {
+			if(strcmp(temp[0], builtIns[j]) == 0) {
+				(*builtInPointers[j])(temp);
+				builtIn = 1;
+				break;
+			}
+		}
+		//command is not a builtin so execute it
+		if(!builtIn) {
+			int pid = tashParallelExecute(temp);
+			pidList[waitingProcesses] = pid;
+			waitingProcesses++;
+		}
+	}
+	//Wait on all processes to finish
+	for(i = 0; i < waitingProcesses; i++) {
+		int status;
+		waitpid(pidList[i], &status, 0);
+	}
+}
+
 //Execute helper function, determines if the passed function is empty, a builtin, or not
 int tashExecuteHelp(char **args) {
 	//check for empty command
@@ -284,6 +384,78 @@ int tashExecuteHelp(char **args) {
 	//command is not a builtin so execute it
 	return tashExecute(args);
 }
+
+//Parallel execute function for non-builtin commands
+int tashParallelExecute(char **args) {
+	pid_t pid;
+	//fork and keep track of pid
+	pid = fork();
+	//check for forking error
+	if(pid < 0) {
+		char error_message[30] = "An error has occurred\n";
+		write(STDERR_FILENO, error_message, strlen(error_message));
+	} else if(pid == 0) {
+		//if child process, then find command location in PATH and execute
+		char p[STRING_MAX];
+		strcpy(p, PATH[0]);
+		int i;
+		//if p is null or empty, then error
+		if(p == '\0' || strcmp(p, "") == 0) {
+			char error_message[30] = "An error has occurred\n";
+			write(STDERR_FILENO, error_message, strlen(error_message));
+			exit(EXIT_FAILURE);
+		}
+		//p must contain something, iterate until program is found or
+		//until p contains "" or is NULL
+		for(i = 1; strcmp(p, "") != 0 && p != NULL; i++) {
+			char *temp = "/";
+			strcat(p, temp);
+			strcat(p, args[0]);
+			int a = access(p, X_OK);
+			
+			//access confirmed that address p contains the program so execute it
+			if(a == 0) {
+				//Check for redirection
+				int j;
+				char **realArgs = (char **)malloc(sizeof(char *) * MAXCMD);
+				for(j = 0; args[j] != NULL; j++) {
+					//If Redirection symbol found, redirect child's output to output file
+					//and break from loop
+					if(strcmp(args[j], ">") == 0) {
+						//Open the output file
+						FILE *out = fopen(args[j+1], "w");
+						//Redirect stdout and stderr
+						dup2(fileno(out), STDOUT_FILENO);
+						dup2(fileno(out), STDERR_FILENO);
+						//close the original fd
+						fclose(out);
+						
+						break;
+					} else {
+						realArgs[j] = args[j];
+					}
+				}
+
+
+				if(execv(p, realArgs) == -1) { 
+					char error_message[30] = "An error has occurred\n";
+					write(STDERR_FILENO, error_message, strlen(error_message));
+				}
+			}
+			strcpy(p, PATH[i]);
+		}
+		//if the child reaches this point, then it failed to execute a command
+		char error_message[30] = "An error has occurred\n";
+		write(STDERR_FILENO, error_message, strlen(error_message));
+		exit(EXIT_FAILURE);
+	} else {
+		//parent does nothing,
+		//parent waits in tashParallelHelp
+	}
+
+	return pid;
+}
+
 
 //Execute function for non-builtin commands
 int tashExecute(char **args) {
