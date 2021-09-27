@@ -9,6 +9,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 //Max string size
 #define STRING_MAX 1000
@@ -101,19 +102,21 @@ void batchMode(FILE *file) {
 		//Check for EOF
 		if(feof(file)) { exit(0); }
 
+		//Parse input for parallel commands
+
+		//Parse and run commmands in parallel
+
+		
+		//Parse and run commands not in parallel
 		//Parse input
 		char **parsed;
 		parsed = parse(line);
-
-
-		//Check for redirection
-
-		//Check for parallel commands
-	
-		//Run commands in parallel
-
-		//Run command if not in parallel
-		tashExecuteHelp(parsed);
+		
+		//Redirection error checking
+		if(parsed != NULL) {
+			//Run command if not in parallel
+			tashExecuteHelp(parsed);
+		}
 	}
 }
 
@@ -135,22 +138,28 @@ void interactiveMode() {
 		//Check for EOF
 		if(feof(stdin)) { exit(0); }
 
+		//Parse input for parrallel
+		
+		//Parse and run commands in parallel
+		
+
+		//Parse and run commands not in parallel
 		//Parse input
 		char **parsed;
 		parsed = parse(line);
 		
-		//Check for redirection
-
-		//Check for parallel commands
-		
-		//Run commands in parrallel
-
-		//Run command if not in parallel
-		tashExecuteHelp(parsed);
+		//Redirection error checking
+		if(parsed != NULL) {
+			//Run command not in parallel
+			tashExecuteHelp(parsed);
+		}
 	}
 
 
 }
+
+
+
 
 //Parsing helper function, passes back an array of tokens
 char **parse(char *l) {
@@ -162,16 +171,86 @@ char **parse(char *l) {
 	char *token;
 	//tracks the current index
 	int i = 0;
+	//Save pointers for reentry with strtok_r
+	char *save1, *save2;
+	//Trackers for error when there is too many ">" or files after that
+	int redirErr = 0;
+	int redirFileErr = 0;
 
 	//grab first token
-	token = strtok(l, DELIM);
+	token = strtok_r(l, DELIM, &save1);
 	//iterate through all tokens
 	while(token != NULL) {
-		//Store the token into tokens
-		tokens[i] = token;
-		i++;
+		//Redirection error checking
+		if(redirErr && redirFileErr) {
+			//Should be empty, thus error
+			char error_message[30] = "An error has occurred\n";
+			write(STDERR_FILENO, error_message, strlen(error_message));
+			return NULL;
+		} else if(redirErr) {
+			//Redirect operator found, output file is next token
+			redirFileErr = 1;
+		}
+
+		//Redirection checking and splitting
+		int j;
+		int found = 0;
+		for(j = 0; token[j] != '\0'; j++) {
+			//If redirection char is found then set found to 1
+			//and exit loop
+			if(token[j] == '>') {
+				found = 1;
+				break;
+			}
+		}
+		//If redirection character was found...
+		if(found) {
+			if(redirErr || redirFileErr) {
+				char error_message[30] = "An error has occurred\n";
+				write(STDERR_FILENO, error_message, strlen(error_message));
+				return NULL;
+			}
+			redirErr = 1;
+			//Holds the current token
+			char *temp;
+			//Redirection character is the first character
+			if(j == 0) {
+				//Add ">" to tokens
+				tokens[i] = ">";
+				i++;
+				//Deliminate on ">"
+				temp = strtok_r(token, ">", &save2);
+				if(temp != NULL) {
+					redirFileErr = 1;
+					tokens[i] = temp;
+					i++;
+				}
+			}
+			//Redirection character is not the first character
+			if(j > 0) {
+				//Deliminate on ">"
+				temp = strtok_r(token, ">", &save2);
+				tokens[i] = temp;
+				i++;
+				//Add ">" to tokens
+				tokens[i] = ">";
+				i++;
+				//If next token is NULL, then ">" was at the end
+				temp = strtok_r(NULL, ">", &save2);
+				if(temp != NULL) {
+					redirFileErr = 1;
+					tokens[i] = temp;
+					i++;
+				}
+			}
+		} else {
+			//Redirection character wasnt found
+			//Store the token into tokens
+			tokens[i] = token;
+			i++;
+		}
 		//Grab next token
-		token = strtok(NULL, DELIM);
+		token = strtok_r(NULL, DELIM, &save1);
 		
 		//If tokens is full, increase its size
 		if(i > tSize) {
@@ -179,6 +258,14 @@ char **parse(char *l) {
 			tokens = realloc(tokens, tSize * sizeof(char*));
 		}
 	}
+	//Redirection error checking
+	if(redirErr && !redirFileErr) {
+		//Redirection operator found, but no file following it
+		char error_message[30] = "An error has occurred\n";
+		write(STDERR_FILENO, error_message, strlen(error_message));
+		return NULL;
+	}
+
 	//Set the last argument to null for execv
 	tokens[i] = NULL;
 	return tokens;
@@ -228,7 +315,29 @@ int tashExecute(char **args) {
 			
 			//access confirmed that address p contains the program so execute it
 			if(a == 0) {
-				if(execv(p, args) == -1) { 
+				//Check for redirection
+				int j;
+				char **realArgs = (char **)malloc(sizeof(char *) * MAXCMD);
+				for(j = 0; args[j] != NULL; j++) {
+					//If Redirection symbol found, redirect child's output to output file
+					//and break from loop
+					if(strcmp(args[j], ">") == 0) {
+						//Open the output file
+						FILE *out = fopen(args[j+1], "w");
+						//Redirect stdout and stderr
+						dup2(fileno(out), STDOUT_FILENO);
+						dup2(fileno(out), STDERR_FILENO);
+						//close the original fd
+						fclose(out);
+						
+						break;
+					} else {
+						realArgs[j] = args[j];
+					}
+				}
+
+
+				if(execv(p, realArgs) == -1) { 
 					char error_message[30] = "An error has occurred\n";
 					write(STDERR_FILENO, error_message, strlen(error_message));
 				}
