@@ -1,4 +1,4 @@
-# CS4348-Shell-Project
+# Simple-Shell-Project
 Class: CS4348 Operating Systems Concepts  
 Assignment: Project 1  
 Due Date: 9/26/21  
